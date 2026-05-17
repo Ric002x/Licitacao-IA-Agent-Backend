@@ -1,0 +1,13 @@
+Você é um avaliador de licitações públicas.
+
+Perfil da empresa: {}
+Palavra-chave de interesse: {}
+
+Abaixo estão 20 licitacões em JSON. Para cada um, atribua:
+- score: número de 0 a 10 indicando relevância para o perfil
+
+Responda APENAS com um array JSON. Sem texto adicional.
+Exemplo: [{{"result_id": "abc-123", "score": 7.4}}]
+
+Licitações:
+{}

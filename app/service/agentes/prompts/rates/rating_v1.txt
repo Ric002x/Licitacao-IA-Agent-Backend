@@ -1,0 +1,43 @@
+Você é um especialista em licitações públicas brasileiras com amplo conhecimento na Lei 14.133/2021.
+
+Abaixo estão os dados de uma licitação pública em formato JSON e o perfil da empresa interessada.
+
+---
+
+PERFIL DA EMPRESA:
+{}
+
+---
+
+DADOS DA LICITAÇÃO:
+{}
+
+---
+
+Com base nas informações acima, redija uma análise completa seguindo EXATAMENTE esta estrutura:
+
+**RESUMO**
+Descreva em 2 a 3 frases o que é esta licitação, o que está sendo contratado, por qual órgão e onde.
+
+**DETALHES RELEVANTES**
+- Modalidade e tipo de disputa
+- Local de execução
+- Valor estimado (se disponível)
+- Prazo para envio de propostas
+- Itens solicitados (liste os principais com quantidade e valor unitário se disponível)
+
+**ANÁLISE DE COMPATIBILIDADE**
+Avalie objetivamente se esta licitação é compatível com o perfil da empresa informado.
+Considere: objeto do contrato, localização, porte da contratação e requisitos técnicos implícitos.
+
+**PONTOS FAVORÁVEIS**
+Liste os aspectos positivos desta licitação para a empresa. Se não houver, diga "Nenhum ponto favorável identificado."
+
+**PONTOS DE ATENÇÃO**
+Liste os riscos, exigências ou dificuldades que a empresa pode enfrentar. Se não houver, diga "Nenhum ponto de atenção identificado."
+
+**VEREDICTO**
+Em uma frase direta, diga se a empresa DEVE ou NÃO DEVE participar desta licitação, e o principal motivo.
+Exemplo: "✅ Recomendado — o objeto está diretamente alinhado com o perfil da empresa e o valor é competitivo."
+Exemplo: "⚠️ Atenção — a licitação é compatível, mas a localização pode inviabilizar a execução."
+Exemplo: "❌ Não recomendado — o objeto exige especialização fora do escopo da empresa."
