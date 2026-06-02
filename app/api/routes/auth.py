@@ -1,8 +1,8 @@
 from datetime import timedelta, datetime
-from app.schemas.auth import AuthBody, Token
-from app.schemas.user import UserRead
-from fastapi import APIRouter, Form, HTTPException
+from app.schemas.auth import AuthBody
+from fastapi import APIRouter,  HTTPException
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, SessionDep
 from app.models.models import User
@@ -24,7 +24,7 @@ def create_token(user_id):
     return token
 
 
-def authenticate_user(session, email, password):
+def authenticate_user(session: Session, email, password):
     user = session.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(
@@ -37,7 +37,7 @@ def authenticate_user(session, email, password):
         return JSONResponse(
             {
                 "access_token": token_jwt,
-                "token_type": "Bearer"
+                "user": user.data
             }
         )
     else:
@@ -47,18 +47,11 @@ def authenticate_user(session, email, password):
         )
 
 
-@router.post("/private_auth", include_in_schema=False)
-def private_auth_login_for_docs(
-    session: SessionDep, username: str = Form(None), password: str = Form(None)
-):
-    return authenticate_user(session, username, password)
-
-
-@router.post("/login", response_model=Token)
+@router.post("/login")
 def user_login(session: SessionDep, data: AuthBody):
     return authenticate_user(session, data.email, data.password)
 
 
-@router.post("/", response_model=UserRead)
+@router.get("/me")
 def get_current_user(current_user: CurrentUser):
     return current_user

@@ -1,7 +1,9 @@
+from app.api.routes.auth import create_token
 from app.schemas.user import UserCreate, UserUpdate
 from fastapi import APIRouter, HTTPException, status
 from app.models.models import User
 from app.api.deps import SessionDep, CurrentUser
+from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
 
@@ -25,7 +27,13 @@ def criar_usuario(data: UserCreate, db: SessionDep):
     db.add(user_obj)
     db.commit()
 
-    return user_obj.data
+    token_jwt = create_token(user_obj.id)
+    return JSONResponse(
+        {
+            "access_token": token_jwt,
+            "user": user_obj.data
+        }
+    )
 
 
 @router.put("/atualizar")
