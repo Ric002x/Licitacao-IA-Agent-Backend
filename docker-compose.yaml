@@ -32,6 +32,21 @@ services:
     networks:
       - app_network
 
+  licitacoes_server:
+    build: .
+    ports:
+      - "8000:8000"
+    container_name: licitacoes_server
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      PNCPLINK: ${PNCPLINK}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app_network
+
 networks:
   app_network:
     driver: bridge
