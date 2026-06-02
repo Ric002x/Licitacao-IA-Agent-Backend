@@ -17,6 +17,7 @@ from app.models.models import (
     RpaScrapEvent, RpaScrapResult,
     RpaRequestStepEnum, RpaRequestStatusEnum
 )
+from selenium.common.exceptions import TimeoutException
 
 
 # ThreadPoolExecutor para executar tarefas síncronas em background
@@ -32,6 +33,7 @@ options.add_argument("--window-size=1920,1080")
 options.add_argument("--disable-gpu")    # Often needed in Windows environments
 # Essential for running in Docker/Linux
 options.add_argument("--no-sandbox")
+options.add_argument("--disable-dev-shm-usage")
 
 
 load_dotenv()
@@ -112,15 +114,22 @@ def get_links(driver: Chrome, filtro: FiltroLicitacao):
     return links
 
 
-def get_contract_itens(driver: Chrome) -> list:
+def get_contract_itens(driver: Chrome) -> list | None:
     data_itens = []
     id = 1
 
     while True:
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//pncp-tab[contains(@title, 'Itens')]//datatable-body//datatable-scroller/datatable-row-wrapper"))  # noqa: E501
-        )
+        MAX_RETRY = 3
+        for tentativa in range(MAX_RETRY):
+            try:
+                WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, "//pncp-tab[contains(@title, 'Itens')]//datatable-body//datatable-scroller/datatable-row-wrapper"))  # noqa: E501
+                )
+                break
+            except TimeoutException:
+                if tentativa == MAX_RETRY - 1:
+                    return
 
         data_table = driver.find_elements(
             By.XPATH, "//pncp-tab[contains(@title, 'Itens')]//datatable-body//datatable-scroller/datatable-row-wrapper"  # noqa: E501
@@ -162,9 +171,17 @@ def get_contract_itens(driver: Chrome) -> list:
 
 def get_edital_files_data(driver: Chrome):
 
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((
-        By.XPATH, "//pncp-tab-set//ul"
-    )))
+    MAX_RETRY = 3
+    for tentativa in range(MAX_RETRY):
+        try:
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((
+                By.XPATH, "//pncp-tab-set//ul"
+            )))
+
+            break
+        except TimeoutException:
+            if tentativa == MAX_RETRY - 1:
+                return
 
     arquivos_elemento_button = driver.find_element(
         By.XPATH, "//pncp-tab-set//ul/li[2]/button"
@@ -221,24 +238,39 @@ def get_edital_files_data(driver: Chrome):
 
 def get_descricao_licitacao(link: str, driver: Chrome):
     driver.get(link)
-    WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located((
-            By.XPATH, "//strong[text()='Local:']/following-sibling::span"
-        ))
-    )
+
+    MAX_RETRY = 3
+    for tentativa in range(MAX_RETRY):
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((
+                    By.XPATH, "//strong[text()='Local:']/following-sibling::span"  # noqa: E501
+                ))
+            )
+
+            break
+        except TimeoutException:
+            if tentativa == MAX_RETRY - 1:
+                return
 
     descricao = {}
 
     descricao['link'] = link
 
+    descricao['nome'] = driver.find_element(
+        By.TAG_NAME, "h1"
+    ).text
     descricao['local'] = driver.find_element(
         By.XPATH, "//strong[text()='Local:']/following-sibling::span").text
 
     descricao['orgao'] = driver.find_element(
         By.XPATH, "//strong[text()='Órgão:']/following-sibling::span").text
 
-    descricao['unidade_compradora'] = driver.find_element(
-        By.XPATH, "//p[.//strong//span[contains(text(), 'Unidade compradora')]]//span[not(ancestor::strong)]").text  # noqa: E501
+    try:
+        descricao['unidade_compradora'] = driver.find_element(
+            By.XPATH, "//p[.//strong//span[contains(text(), 'Unidade compradora')]]//span[not(ancestor::strong)]").text  # noqa: E501
+    except NoSuchElementException:
+        descricao['unidade_compradora'] = ""
 
     descricao['modalidade_de_contratacao'] = driver.find_element(
         By.XPATH, "//strong[text()='Modalidade da contratação:']/following-sibling::span").text  # noqa: E501
@@ -299,9 +331,15 @@ def get_licitacoes(driver: Chrome, links: list) -> list[dict]:
     seq = 1
 
     for link in links:
-        descricao = get_descricao_licitacao(link, driver)
-        itens_licitacao = get_contract_itens(driver)
-        files = get_edital_files_data(driver)
+        try:
+            descricao = get_descricao_licitacao(link, driver)
+            itens_licitacao = get_contract_itens(driver)
+            files = get_edital_files_data(driver)
+
+        except Exception:
+            continue
+
+        time.sleep(1)
 
         licitacoes.append({
             "numero": seq,
@@ -384,14 +422,14 @@ def iniciar_rpa(
         })
         db.commit()
 
-    except Exception as e:
+    except Exception:
         # Atualizar status de erro
         db.query(RpaScrapEvent).filter(
             RpaScrapEvent.request_id == request_id
         ).update({
             RpaScrapEvent.step: RpaRequestStepEnum.COMPLETED,
             RpaScrapEvent.status: RpaRequestStatusEnum.FAILURE,
-            RpaScrapEvent.message: f"Erro: {str(e)}"
+            RpaScrapEvent.message: "Erro: não foi possível concluir a buscar, por favor, tente novamente!"  # noqa: E501
         })
         db.commit()
         raise
