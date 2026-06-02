@@ -13,7 +13,7 @@ def load_prompt(version="v1") -> str:
     return path.read_text(encoding="utf-8")
 
 
-def analise_ia_detail(licitacao):
+async def analise_ia_detail(licitacao):
     """
     Avaliação da IA para descrição da licitação
     """

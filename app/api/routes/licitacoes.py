@@ -49,7 +49,7 @@ async def procurar_licitacoes(
         "palavra_chave": filtro.palavra_chave,
         "ufs": filtro.ufs,
         "modalidades": filtro.modalidades_de_contratacao,
-        "descriccao_para_ia": filtro.descricao_analise_ia
+        "descricao_analise_ia": filtro.descricao_analise_ia
     }
 
     if filtro.request_id:
@@ -64,6 +64,7 @@ async def procurar_licitacoes(
                 detail="Requisição não encontrada para este id")
 
         requisicao.filter_payload = filter_payload
+        requisicao.title = f"Busca: {filtro.palavra_chave or 'Sem filtro'}"
         db.commit()
         db.refresh(requisicao)
 
@@ -105,11 +106,11 @@ async def procurar_licitacoes(
     )
 
     return {
-        "request_id": str(requisicao.id),
-        "status": status.status.value,
-        "step": status.step.value,
-        "message": status.message,
-        "created_at": requisicao.created_at.isoformat()
+        "id": str(requisicao.id),
+        "title": requisicao.title,
+        "filter_payload": requisicao.filter_payload,
+        "created_at": requisicao.created_at,
+        "updated_at": requisicao.updated_at
     }
 
 
@@ -130,8 +131,11 @@ async def status_licitacao(
         )
 
     return {
-        "message": f"Detalhes da solicitação de id {request_id}",
-        "data": status
+        "request_id": str(status.request_id),
+        "step": status.step.value,
+        "status": status.status.value,
+        "message": status.message,
+        "created_at": status.created_at
     }
 
 
@@ -146,15 +150,26 @@ async def resultado_licitacoes(
             RpaIARating.score,
             RpaIARating.rating_detail,
         )
-        .join(RpaIARating, RpaIARating.result_id == RpaScrapResult.id)
-        .filter(RpaScrapResult.request_id == request_id,
-                RpaScrapRequest.requested_by_user_id == current_user.id)
+        .join(
+            RpaIARating,
+            RpaIARating.result_id == RpaScrapResult.id
+        )
+        .join(
+            RpaScrapRequest,
+            RpaScrapRequest.id == RpaScrapResult.request_id
+        )
+        .filter(
+            RpaScrapResult.request_id == request_id,
+            RpaScrapRequest.requested_by_user_id == current_user.id
+        )
         .order_by(RpaIARating.score.desc())
         .all()
     )
 
-    if not resultados:
-        return {"message": "requisição não encontrada para esse id"}
+    if not resultados or not len(resultados) > 0:
+        raise HTTPException(
+            404, "resultados não encontrados para esse id"
+        )
 
     return [
         {
@@ -202,7 +217,7 @@ async def gerar_descricao_ia(
     async def gerador_resposta():
         texto_acumulado = []
 
-        for chunk in analise_ia_detail(resultado):
+        async for chunk in analise_ia_detail(resultado):
             texto_acumulado.append(chunk)
             yield chunk
 
@@ -210,3 +225,29 @@ async def gerar_descricao_ia(
         background_tasks.add_task(salvar_no_banco, texto_final)
 
     return StreamingResponse(gerador_resposta(), media_type="text/plain")
+
+
+@router.get("/requisicoes")
+async def get_requisicoes(db: SessionDep, current_user: CurrentUser):
+    requisicoes = (
+        db.query(
+            RpaScrapRequest.id,
+            RpaScrapRequest.title,
+            RpaScrapRequest.filter_payload,
+            RpaScrapRequest.created_at
+        )
+        .filter(
+            RpaScrapRequest.requested_by_user_id == current_user.id
+        )
+        .all()
+    )
+
+    return [
+        {
+            "id": r.id,
+            "title": r.title,
+            "filter_payload": r.filter_payload,
+            "created_at": r.created_at,
+        }
+        for r in requisicoes
+    ]
