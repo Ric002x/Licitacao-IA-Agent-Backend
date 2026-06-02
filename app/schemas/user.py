@@ -4,7 +4,7 @@ from pydantic import BaseModel, EmailStr, StringConstraints, field_validator
 
 
 class UserRead(BaseModel):
-    id: int
+    id: str
     email: str
     username: str
     is_superuser: bool

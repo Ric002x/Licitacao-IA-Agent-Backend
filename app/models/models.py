@@ -72,14 +72,14 @@ class User(Base):
 
     @property
     def data(self) -> dict[str, Any]:
-        exclude = {"password"}
+        exclude = {"password", "deleted_at"}
         result = {}
 
         for column in self.__table__.columns:
             if column.name in exclude:
                 continue
 
-            value = getattr(self, column.name)
+            value = str(getattr(self, column.name))
             result[column.name] = value
 
         return result

@@ -2,6 +2,7 @@
 Schemas de autenticação
 """
 from pydantic import BaseModel, EmailStr
+from app.schemas.user import UserRead
 
 
 class AuthBody(BaseModel):
@@ -20,5 +21,5 @@ class TokenPayload(BaseModel):
 
 class Token(BaseModel):
     """Response com o token de acesso"""
+    user: UserRead
     access_token: str
-    token_type: str = "bearer"

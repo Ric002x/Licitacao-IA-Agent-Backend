@@ -9,7 +9,7 @@ engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
 def init_db(session: Session) -> None:
 
     user = session.query(User).filter(
-        User.email == settings.FIRST_SUPERUSER).first()
+        User.username == settings.FIRST_SUPERUSER_USERNAME).first()
 
     if not user:
         user_in = User(

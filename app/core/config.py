@@ -25,11 +25,11 @@ class Settings:
     )
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(
-        os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60*24*8)
+        os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60*24*15)
     )
 
     # Banco de dados
-    POSTGRES_HOST: str = os.getenv("DB_HOST", "localhost")
+    POSTGRES_HOST: str = os.getenv("DB_HOST", "postgres")
     POSTGRES_PORT: int = int(os.getenv("DB_PORT", 5432))
     POSTGRES_USER: str = os.getenv("DB_USER", "postgres")
     POSTGRES_PASSWORD: str = os.getenv("DB_PASSWORD", "postgres")
