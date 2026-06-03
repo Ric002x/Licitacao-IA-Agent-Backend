@@ -1,3 +1,5 @@
+import asyncio
+
 from google import genai
 from pathlib import Path
 
@@ -31,3 +33,4 @@ async def analise_ia_detail(licitacao):
     for chunk in response:
         if chunk.text:
             yield chunk.text
+            await asyncio.sleep(0)
