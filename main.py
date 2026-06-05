@@ -11,7 +11,9 @@ api = FastAPI(
     title=settings.PROJECT_NAME,
     description=settings.PROJECT_DESCRIPTION,
     version=settings.PROJECT_VERSION,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    docs_url="/docs" if settings.ENVIRONMENT == "development" else None,
+    redoc_url="/redocs" if settings.ENVIRONMENT == "development" else None
 )
 
 origins = ["*"]

@@ -364,10 +364,23 @@ def iniciar_rpa(
         link = os.getenv("PNCPLINK", "")
         driver.get(link)
 
-        licit_links = get_links(
-            driver,
-            filtro
-        )
+        try:
+            licit_links = get_links(
+                driver,
+                filtro
+            )
+        except Exception:
+            db.query(RpaScrapEvent).filter(
+                RpaScrapEvent.request_id == request_id
+            ).update({
+                RpaScrapEvent.step: RpaRequestStepEnum.COMPLETED,
+                RpaScrapEvent.status: RpaRequestStatusEnum.FAILURE,
+                RpaScrapEvent.message: "Os servidores da PNCP parecem estar sofrendo com instabilidade. Por favor, tente novamente mais tarde."  # noqa: E501
+            })
+            db.commit()
+            raise
+        finally:
+            driver.close()
 
         db.query(RpaScrapEvent).filter(
             RpaScrapEvent.request_id == request_id
@@ -429,7 +442,7 @@ def iniciar_rpa(
         ).update({
             RpaScrapEvent.step: RpaRequestStepEnum.COMPLETED,
             RpaScrapEvent.status: RpaRequestStatusEnum.FAILURE,
-            RpaScrapEvent.message: "Erro: não foi possível concluir a buscar, por favor, tente novamente!"  # noqa: E501
+            RpaScrapEvent.message: "Um erro inesperado ocorreu e as licitações não foram encontradas. Tente novamente mais tarde"  # noqa: E501
         })
         db.commit()
         raise

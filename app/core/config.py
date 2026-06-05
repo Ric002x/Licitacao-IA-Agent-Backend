@@ -17,6 +17,7 @@ class Settings:
     PROJECT_NAME: str = "Licitações RPA API"
     PROJECT_VERSION: str = "1.0.0"
     PROJECT_DESCRIPTION: str = "API para buscar e analisar licitações"
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
 
     # Segurança
     SECRET_KEY: str = os.getenv(

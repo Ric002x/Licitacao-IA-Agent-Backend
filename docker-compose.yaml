@@ -37,10 +37,8 @@ services:
     ports:
       - "8000:8000"
     container_name: licitacoes_server
-    environment:
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-      PNCPLINK: ${PNCPLINK}
-      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+    env_file:
+      - ./.env
     depends_on:
       postgres:
         condition: service_healthy
