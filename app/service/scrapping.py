@@ -3,7 +3,6 @@ import time
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-from app.core.config import settings
 from app.service.agentes.agente_rating_score import analise_ia
 from dotenv import load_dotenv
 from app.schemas.licitacoes import FiltroLicitacao
@@ -27,9 +26,6 @@ executor = ThreadPoolExecutor(max_workers=5)
 
 # 1. Setup Chrome Options
 options = Options()
-
-if settings.ENVIRONMENT == "production":
-    options.binary_location = "/snap/bin/chromium"
 
 options.add_argument("--headless=new")
 options.add_argument("--window-size=1920,1080")
@@ -383,9 +379,8 @@ def iniciar_rpa(
                 RpaScrapEvent.message: "Os servidores da PNCP parecem estar sofrendo com instabilidade. Por favor, tente novamente mais tarde."  # noqa: E501
             })
             db.commit()
-            raise
-        finally:
             driver.close()
+            raise
 
         db.query(RpaScrapEvent).filter(
             RpaScrapEvent.request_id == request_id
