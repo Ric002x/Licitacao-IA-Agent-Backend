@@ -118,11 +118,17 @@ async def procurar_licitacoes(
 async def status_licitacao(
         current_user: CurrentUser, request_id: str, db: SessionDep):
     """Obtém os detalhes de uma licitação específica"""
-    status = db.query(RpaScrapEvent).filter(
-        RpaScrapEvent.request_id == request_id,
-        RpaScrapRequest.requested_by_user_id == current_user.id
-
-    ).first()
+    status = (
+        db.query(RpaScrapEvent).filter(
+            RpaScrapEvent.request_id == request_id,
+            RpaScrapRequest.requested_by_user_id == current_user.id
+        )
+        .join(
+            RpaScrapRequest,
+            RpaScrapEvent.request_id == RpaScrapRequest.id
+        )
+        .first()
+    )
 
     if not status:
         raise HTTPException(

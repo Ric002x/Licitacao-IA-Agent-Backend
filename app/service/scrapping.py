@@ -28,7 +28,6 @@ executor = ThreadPoolExecutor(max_workers=5)
 options = Options()
 
 options.add_argument("--headless=new")
-options.add_argument("--window-size=1920,1080")
 
 # 2. Recommended flags for stability
 options.add_argument("--disable-gpu")    # Often needed in Windows environments
@@ -447,7 +446,8 @@ def iniciar_rpa(
         db.commit()
         raise
     finally:
-        driver.close()
+        if driver:
+            driver.close()
 
     return licitacoes
 
