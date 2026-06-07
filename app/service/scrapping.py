@@ -54,13 +54,15 @@ def get_links(driver: Chrome, filtro: FiltroLicitacao):
 
     # inserir estados
     if filtro.ufs and len(filtro.ufs) > 0:
-        driver.find_element(
-            By.XPATH, "//pncp-select[.//label[contains(@for, 'ufs')]]//input"
-        ).click()
+        input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((
+                By.XPATH, "//pncp-select[.//label[contains(@for, 'ufs')]]//input"  # noqa: E501
+            )))
+        input.click()
 
         for i in filtro.ufs:
             option = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable(
+                EC.presence_of_element_located(
                     (By.XPATH, f"//div[contains(@title, '{i}')]")
                 )
             )
@@ -69,9 +71,11 @@ def get_links(driver: Chrome, filtro: FiltroLicitacao):
     # inserir modalidade de contratação
     if filtro.modalidades_de_contratacao and \
             len(filtro.modalidades_de_contratacao) > 0:
-        driver.find_element(
-            By.XPATH, "//pncp-select[.//label[contains(@for, 'modalidades')]]//input"  # noqa: E501
-        ).click()
+        input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((
+                By.XPATH, "//pncp-select[.//label[contains(@for, 'modalidades')]]//input"  # noqa: E501
+            )))
+        input.click
         for i in filtro.modalidades_de_contratacao:
             option = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable(
