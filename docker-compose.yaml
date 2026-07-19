@@ -33,7 +33,7 @@ services:
       - app_network
 
   licitacoes_server:
-    build: .
+    build: ./
     ports:
       - "8000:8000"
     container_name: licitacoes_server

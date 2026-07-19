@@ -2,26 +2,21 @@
 Router para rotas de licitações
 """
 import asyncio
+from datetime import datetime
 
 from app.service.agentes.agente_rating_detail import analise_ia_detail
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from app.schemas.licitacoes import DescricaoIA, FiltroLicitacao
-from app.service.scrapping import iniciar_rpa_background
+from app.service.scrapping import iniciar_rpa
 from app.api.deps import SessionDep, CurrentUser
 from app.models.models import (
     RpaIARating, RpaScrapRequest, RpaScrapEvent, RpaRequestStepEnum,
     RpaRequestStatusEnum, RpaScrapResult
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 
 router = APIRouter(prefix="/licitacoes", tags=["licitacoes"])
-
-
-@router.get("/")
-async def listar_licitacoes(db: SessionDep):
-    """Lista todas as licitações"""
-    return {"message": "Lista de licitações", "data": []}
 
 
 @router.post("/procurar")
@@ -55,7 +50,8 @@ async def procurar_licitacoes(
     if filtro.request_id:
         requisicao = db.query(RpaScrapRequest).filter(
             RpaScrapRequest.requested_by_user_id == current_user.id,
-            RpaScrapRequest.id == filtro.request_id
+            RpaScrapRequest.id == filtro.request_id,
+            # RpaScrapRequest.deleted_at.isnot(None)
         ).first()
 
         if not requisicao:
@@ -98,11 +94,14 @@ async def procurar_licitacoes(
         )
         db.add(status)
 
-    db.commit()
-    db.refresh(status)
+    try:
+        db.commit()
+        db.refresh(status)
+    except Exception as e:
+        return {"erro": e}
 
     asyncio.create_task(
-        iniciar_rpa_background(db, filtro, str(requisicao.id))
+        iniciar_rpa(db, filtro, str(requisicao.id))
     )
 
     return {
@@ -121,7 +120,8 @@ async def status_licitacao(
     status = (
         db.query(RpaScrapEvent).filter(
             RpaScrapEvent.request_id == request_id,
-            RpaScrapRequest.requested_by_user_id == current_user.id
+            RpaScrapRequest.requested_by_user_id == current_user.id,
+            # RpaScrapRequest.deleted_at.isnot(None)
         )
         .join(
             RpaScrapRequest,
@@ -166,7 +166,8 @@ async def resultado_licitacoes(
         )
         .filter(
             RpaScrapResult.request_id == request_id,
-            RpaScrapRequest.requested_by_user_id == current_user.id
+            RpaScrapRequest.requested_by_user_id == current_user.id,
+            # RpaScrapRequest.deleted_at.isnot(None)
         )
         .order_by(RpaIARating.score.desc())
         .all()
@@ -203,7 +204,8 @@ async def gerar_descricao_ia(
         .join(RpaScrapResult.request)
         .filter(
             RpaScrapResult.id == descricao_ia.result_id,
-            RpaScrapRequest.requested_by_user_id == current_user.id
+            RpaScrapRequest.requested_by_user_id == current_user.id,
+            # RpaScrapRequest.deleted_at.isnot(None)
         )
         .first()
     )
@@ -243,7 +245,8 @@ async def get_requisicoes(db: SessionDep, current_user: CurrentUser):
             RpaScrapRequest.created_at
         )
         .filter(
-            RpaScrapRequest.requested_by_user_id == current_user.id
+            RpaScrapRequest.requested_by_user_id == current_user.id,
+            # RpaScrapRequest.deleted_at.isnot(None)
         )
         .all()
     )
@@ -257,3 +260,26 @@ async def get_requisicoes(db: SessionDep, current_user: CurrentUser):
         }
         for r in requisicoes
     ]
+
+
+@router.delete("/deletar")
+async def soft_delete_requisicao(
+    db: SessionDep, current_user: CurrentUser, request_id: str
+):
+    requisicao = db.query(RpaScrapRequest).filter(
+        RpaScrapRequest.id == request_id,
+        RpaScrapRequest.requested_by_user_id == current_user.id,
+        # RpaScrapRequest.deleted_at.isnot(None)
+    ).first()
+    if not requisicao:
+        raise HTTPException(
+            404, "Requisição não encontrada"
+        )
+
+    requisicao.deleted_at = datetime.now()
+    db.commit()
+    db.refresh(requisicao)
+
+    return JSONResponse({
+        "message": "requisição deletada com sucesso"
+    })

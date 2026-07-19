@@ -27,10 +27,10 @@ def analise_ia(db: Session, filtro: FiltroLicitacao, resultados: list):
         res_id = str(resultado.id)
         lista.append({
             "result_id": str(res_id),
-            "objeto": descricao.get("objeto"),
-            "modalidade": descricao.get("modalidade_de_contratacao"),
-            "local": descricao.get("local"),
-            "valor": descricao.get("valor_estimado_da_compra"),
+            "descricao": descricao.get("descricao"),
+            "modalidade_de_contratacao": descricao.get(
+                "modalidade_de_contratacao"),
+            "valor": descricao.get("valor_estimado"),
             "informacao_complementar": descricao.get("informacao_complementar")
         })
 
