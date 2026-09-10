@@ -4,13 +4,14 @@ import random
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlencode
+from uuid import UUID
 
+from app.core.db import SessionLocal
 from app.service.agentes.agente_rating_score import analise_ia
 from dotenv import load_dotenv
 from app.schemas.licitacoes import FiltroLicitacao
-from sqlalchemy.orm import Session
 from app.models.models import (
-    RpaScrapEvent, RpaScrapResult,
+    RpaScrapEvent, RpaScrapRequest, RpaScrapResult,
     RpaRequestStepEnum, RpaRequestStatusEnum
 )
 import httpx
@@ -47,19 +48,19 @@ async def handle_request(url: str) -> httpx.Response | None:
     return None
 
 
-def create_search_url(filtro: FiltroLicitacao):
+def create_search_url(filtro: FiltroLicitacao, page: int):
     inital_url = os.getenv("PNCP_LINK_SEARCH", "")
 
     params = {
         "tipos_documento": "edital",
         "ordenacao": "-data",
-        "pagina": 1,
-        "tam_pagina": 20,
+        "pagina": page,
+        "tam_pagina": 50,
         "status": "recebendo_proposta",
     }
 
-    if filtro.palavra_chave:
-        params["q"] = filtro.palavra_chave
+    if filtro.palavras_chaves:
+        params["q"] = " ".join(filtro.palavras_chaves)
 
     if filtro.ufs:
         params["ufs"] = "|".join(filtro.ufs)
@@ -122,174 +123,239 @@ async def get_licit_details(licitacao):
     }
 
 
-def update_status(
-    db: Session, request_id: str, seq: int,
-        total_licit: int, fail: int
+async def pegar_licitacoes_base(
+        filtro: FiltroLicitacao,
+        request: RpaScrapRequest, page: int
 ):
-    total = f"{seq + 1}/{total_licit} processadas. Falhas: {fail}"
-
-    db.query(RpaScrapEvent).filter(
-        RpaScrapEvent.request_id == request_id
-    ).update({
-        RpaScrapEvent.step: RpaRequestStepEnum.PROCESSING,
-        RpaScrapEvent.status: RpaRequestStatusEnum.PROCESSING,
-        RpaScrapEvent.message: total
-    })
-    db.commit()
-
-
-async def get_licit_data(
-        db: Session, request_id: str, licitacoes_list: list[dict]
-):
-    licitacoes = []
-    seq = 0
-    fail = 0
-
-    for licit in licitacoes_list:
-        detail = await get_licit_details(licit)
-        itens = await get_licit_itens(licit)
-
-        if not detail:
-            fail = fail + 1
-            update_status(db, request_id, seq, len(licitacoes_list), fail)
-
-            seq = seq + 1
-            continue
-
-        if not itens or not len(itens) > 0:
-            fail = fail + 1
-            update_status(db, request_id, seq, len(licitacoes_list), fail)
-
-            seq = seq + 1
-            continue
-
-        licitacao = {
-            "nome": licit.get("title", ""),
-            "link": f"https://pncp.gov.br/app/editais/"
-            f"{licit.get("orgao_cnpj", "")}/{licit.get("ano", "")}/"
-            f"{licit.get("numero_sequencial", "")}",
-            "descricao": licit.get("description", ""),
-            "orgao_nome": licit.get("orgao_nome", ""),
-            "orgao_cnpj": licit.get("orgao_cnpj", ""),
-            "unidade_compradora": licit.get("unidade_nome", ""),
-            "amparo_legal": detail.get("amparo_legal", "").get("nome"),
-            "modalidade_de_contratacao": licit.get(
-                "modalidade_licitacao_nome", ""),
-            "tipo": licit.get("tipo_nome", ""),
-            "data_divulgacao": licit.get("data_publicacao_pncp", ""),
-            "situacao": licit.get("situacao_nome", ""),
-            "fonte_orcamentaria": detail.get("fonte", ""),
-            "informacao_complementar": detail.get(
-                "informacao_complementar", ""),
-            "valor_estimado": detail.get("valor_estimado", ""),
-            "valor_homologado": detail.get("valor_homologado", ""),
-            "ano": licit.get("ano", ""),
-            "numero_sequencial": licit.get("numero_sequencial", ""),
-            "uf": licit.get("uf", ""),
-            "uf_nome": detail.get("uf_nome", ""),
-            "municipio": licit.get("municipio_nome", ""),
-            "link_origem": detail.get("link_origem", ""),
-            "propostas_data_inicio": licit.get("data_inicio_vigencia", ""),
-            "propostas_data_fim": licit.get("data_fim_vigencia", "")
-        }
-
-        licitacoes.append({
-            "numero": seq,
-            "descricao": licitacao,
-            "itens": itens
-        })
-
-        update_status(db, request_id, seq, len(licitacoes_list), fail)
-
-        seq = seq + 1
-
-    return licitacoes
-
-
-async def iniciar_rpa(db: Session, filtro: FiltroLicitacao, request_id: str):
-    search_url = create_search_url(filtro)
+    db = SessionLocal()
+    search_url = create_search_url(filtro, page)
+    print(search_url)
 
     try:
         response = await handle_request(search_url)
 
-        # Se a URL falhar, salvar e levantar o erro
         if not response:
             db.query(RpaScrapEvent).filter(
-                    RpaScrapEvent.request_id == request_id
+                    RpaScrapEvent.request_id == request.id
                 ).update({
                     RpaScrapEvent.step: RpaRequestStepEnum.COMPLETED,
                     RpaScrapEvent.status: RpaRequestStatusEnum.FAILURE,
                     RpaScrapEvent.message: "Os servidores da PNCP parecem estar sofrendo com instabilidade. Por favor, tente novamente mais tarde."  # noqa: E501
                 })
             db.commit()
-            raise
+            return
 
-        # Caso encontre a página de search carregue, indiciar que as licitações
-        # foram encontradas
+        if response.status_code == 200:
+            response_json: dict = response.json()
+            if response_json.get("total", 0) == 0:
+                db.query(RpaScrapEvent).filter(
+                        RpaScrapEvent.request_id == request.id
+                    ).update({
+                        RpaScrapEvent.step: RpaRequestStepEnum.COMPLETED,
+                        RpaScrapEvent.status: RpaRequestStatusEnum.OCCURRENCE,
+                        RpaScrapEvent.message: "Nenhuma licitação encontrada para essa busca. Tente fazer alterações nas suas requisições, e tente novamente."  # noqa: E501
+                    })
+                db.commit()
+                return
+
+        licitacoes_res = json.loads(response.text)
+        res_licit_itens = licitacoes_res.get("items")
+
         db.query(RpaScrapEvent).filter(
-            RpaScrapEvent.request_id == request_id
+            RpaScrapEvent.request_id == request.id
         ).update({
             RpaScrapEvent.step: RpaRequestStepEnum.PROCESSING,
             RpaScrapEvent.status: RpaRequestStatusEnum.PROCESSING,
             RpaScrapEvent.message: "Processando licitações"
         })
+
         db.commit()
 
-        licitacoes_res = json.loads(response.text)
-        res_licit_itens = licitacoes_res.get("items")
+        licitacoes = []
+        seq = 0
+        fail = 0
 
-        licitacoes = await get_licit_data(db, request_id, res_licit_itens)
+        for licit in res_licit_itens:
 
-        # Atualizar status de inicio de avaliação da IA
+            try:
+                licitacao = {
+                    "id_pncp": licit.get("id", ""),
+                    "nome": licit.get("title", ""),
+                    "link": f"https://pncp.gov.br/app/editais/"
+                    f"{licit.get("orgao_cnpj", "")}/{licit.get("ano", "")}/"
+                    f"{licit.get("numero_sequencial", "")}",
+                    "descricao": licit.get("description", ""),
+                    "orgao_nome": licit.get("orgao_nome", ""),
+                    "orgao_cnpj": licit.get("orgao_cnpj", ""),
+                    "unidade_compradora": licit.get("unidade_nome", ""),
+                    "modalidade_de_contratacao": licit.get(
+                        "modalidade_licitacao_nome", ""),
+                    "tipo": licit.get("tipo_nome", ""),
+                    "data_divulgacao": licit.get("data_publicacao_pncp", ""),
+                    "situacao": licit.get("situacao_nome", ""),
+                    "ano": licit.get("ano", ""),
+                    "numero_sequencial": licit.get("numero_sequencial", ""),
+                    "uf": licit.get("uf", ""),
+                    "municipio": licit.get("municipio_nome", ""),
+                    "propostas_data_inicio": licit.get(
+                        "data_inicio_vigencia", ""),
+                    "propostas_data_fim": licit.get("data_fim_vigencia", ""),
+                    "uf_nome": None,
+                    "amparo_legal": None,
+                    "fonte_orcamentaria": None,
+                    "informacao_complementar": None,
+                    "valor_estimado": None,
+                    "valor_homologado": None,
+                    "link_origem": None,
+                }
+
+                licitacoes.append({
+                    "numero": seq,
+                    "descricao": licitacao,
+                    "items": []
+                })
+                seq = seq + 1
+
+            except Exception:
+                fail = fail + 1
+
         db.query(RpaScrapEvent).filter(
-                RpaScrapEvent.request_id == request_id
+                RpaScrapEvent.request_id == request.id
             ).update({
                 RpaScrapEvent.message: "Iniciando a avaliação da IA para as licitacoes encontradas"  # noqa: E501
             })
         db.commit()
 
-        # Deletando resultados antigos, e criando os novos
-        rpa_items = []
+        rpa_items: list[RpaScrapResult] = []
         for licitacao in licitacoes:
             item = RpaScrapResult(
-                request_id=request_id,
+                request_id=request.id,
                 payload=licitacao
             )
 
             rpa_items.append(item)
 
-        db.query(RpaScrapResult).filter(
-            RpaScrapResult.request_id == request_id
-        ).delete()
-
         db.add_all(rpa_items)
         db.commit()
 
-        # avalição IA
-        resultados = db.query(
-            RpaScrapResult.id, RpaScrapResult.payload).filter(
-            RpaScrapResult.request_id == request_id
-        ).all()
-
-        analise_ia(db, filtro, resultados)
+        analise_ia(db, filtro, rpa_items)
 
         db.query(RpaScrapEvent).filter(
-                RpaScrapEvent.request_id == request_id
+                RpaScrapEvent.request_id == request.id
             ).update({
                 RpaScrapEvent.step: RpaRequestStepEnum.COMPLETED,
                 RpaScrapEvent.status: RpaRequestStatusEnum.SUCCESS,
                 RpaScrapEvent.message: f"Processo concluído com {len(licitacoes)} licitações"  # noqa: E501
             })
+
+        db.query(RpaScrapRequest).filter(
+            RpaScrapRequest.id == request.id
+        ).update({
+            RpaScrapRequest.total: len(licitacoes)
+        })
         db.commit()
 
-        return licitacoes
-    except Exception:  # Atualizar status de erro
+        return
+
+    except Exception:
         db.query(RpaScrapEvent).filter(
-            RpaScrapEvent.request_id == request_id
+            RpaScrapEvent.request_id == request.id
         ).update({
             RpaScrapEvent.step: RpaRequestStepEnum.COMPLETED,
             RpaScrapEvent.status: RpaRequestStatusEnum.FAILURE,
             RpaScrapEvent.message: "Um erro inesperado ocorreu e as licitações não foram encontradas. Tente novamente mais tarde"  # noqa: E501
         })
         db.commit()
-        raise
+        return
+
+    finally:
+        db.close()
+
+
+async def pegar_detalhes_licitacao(licitacao_id: str | UUID):
+    db = SessionLocal()
+
+    licitacao_q = (
+        db.query(RpaScrapResult)
+        .filter(RpaScrapResult.id == licitacao_id)
+        .first()
+    )
+
+    if not licitacao_q:
+        return
+
+    licitacao_q.status = "processing"
+    db.commit()
+    db.refresh(licitacao_q)
+
+    payload = licitacao_q.payload
+    new_description: dict = payload.get("descricao", {})
+    payload_items: list = payload.get("items", [])
+
+    try:
+        detail = None
+        if not new_description.get("uf_nome"):
+            detail = await get_licit_details(new_description)
+            if detail:
+                new_description.update(detail)
+
+        items = None
+        if not payload_items:
+            items = await get_licit_itens(new_description)
+            if items:
+                payload_items.extend(items)
+
+        new_payload = {
+            "numero": payload.get("numero"),
+            "descricao": new_description,
+            "items": items or []
+        }
+
+        licitacao_q.payload = new_payload
+
+        if items and detail:
+            db.query(RpaScrapResult).filter(
+                RpaScrapResult.id == licitacao_id).update({
+                    RpaScrapResult.payload: payload,
+                    RpaScrapResult.is_complete: True,
+                    RpaScrapResult.is_loading: False
+                })
+
+        elif not items and not detail:
+            db.query(RpaScrapResult).filter(
+                RpaScrapResult.id == licitacao_id).update({
+                    RpaScrapResult.is_complete: False,
+                    RpaScrapResult.status: "failure",
+                })
+
+        else:
+            db.query(RpaScrapResult).filter(
+                RpaScrapResult.id == licitacao_id).update({
+                    RpaScrapResult.payload: payload,
+                    RpaScrapResult.is_complete: False,
+                    RpaScrapResult.status: "incomplete",
+                })
+
+        db.commit()
+        return licitacao_q
+
+    except Exception:
+        db.rollback()
+
+        # Rebusca a instância dentro da sessão atual
+        licitacao_q = (
+            db.query(RpaScrapResult)
+            .filter(RpaScrapResult.id == licitacao_id)
+            .first()
+        )
+
+        if licitacao_q:
+            licitacao_q.is_complete = False
+            licitacao_q.is_loading = False
+            licitacao_q.status = "failure"
+            db.commit()
+
+        return
+
+    finally:
+        db.close()

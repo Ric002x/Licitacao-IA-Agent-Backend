@@ -25,12 +25,13 @@ async def analise_ia_detail(licitacao):
         licitacao.payload
     )
 
-    response = client.models.generate_content_stream(
-        model="gemini-3-flash-preview",
-        contents=content
+    response = client.interactions.create(
+        model="gemini-3.5-flash-lite",
+        input=content,
+        stream=True
     )
 
     for chunk in response:
-        if chunk.text:
-            yield chunk.text
+        if chunk:
+            yield chunk
             await asyncio.sleep(0)

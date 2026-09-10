@@ -39,24 +39,28 @@ class UserCreate(UserBody):
     def validate_password(cls, v):
         regex = r'(?=^.{8,}$)((?=.*\d)|(?=.*\W+))^(?![.\n])(?=.*[A-Z]).*$'
         if not re.match(regex, v):
-            raise ValueError("The password must have...")
+            raise ValueError(
+                "A senha deve contar pelo menos 8 caracteres, uma letra "
+                "maiúscula e um número")
         return v
 
 
-class UserUpdate(UserBody):
-    password: Annotated[
-        str | None,
+class UserUpdatePassword(BaseModel):
+    new_password: Annotated[
+        str,
         StringConstraints(
             min_length=8
         )
-    ] = None
+    ]
 
-    @field_validator('password')
+    @field_validator('new_password')
     @classmethod
     def validate_password(cls, v):
         if v is None:
             return v
         regex = r'(?=^.{8,}$)((?=.*\d)|(?=.*\W+))^(?![.\n])(?=.*[A-Z]).*$'
         if not re.match(regex, v):
-            raise ValueError("The password must have...")
+            raise ValueError(
+                "A senha deve contar pelo menos 8 caracteres, uma letra "
+                "maiúscula e um número")
         return v

@@ -1,9 +1,15 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.models.models import User
 
 engine = create_engine(str(settings.SQLALCHEMY_DATABASE_URI))
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+)
 
 
 def init_db(session: Session) -> None:

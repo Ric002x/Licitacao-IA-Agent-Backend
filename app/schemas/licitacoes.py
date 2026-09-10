@@ -1,14 +1,26 @@
 
-from typing import Optional
 from pydantic import BaseModel
 
 
 class FiltroLicitacao(BaseModel):
-    palavra_chave: Optional[str] = None
-    request_id: Optional[str] = None
-    ufs: Optional[list[str]] = []
-    modalidades_de_contratacao: Optional[list[str]] = []
+    palavras_chaves: list[str]
+    ufs: list[str]
+    modalidades_de_contratacao: list[int]
     descricao_analise_ia: str
+
+
+class BuscaLicitacoes(BaseModel):
+    enterprise_id: str
+
+
+class RepetirBuscaLicitacoes(BaseModel):
+    enterprise_id: str
+    request_id: str
+
+
+class AtualizarBusca(BaseModel):
+    enterprise_id: str
+    request_id: str
 
 
 class DescricaoIA(BaseModel):

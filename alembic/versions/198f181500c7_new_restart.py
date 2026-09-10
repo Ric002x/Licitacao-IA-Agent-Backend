@@ -1,8 +1,8 @@
-"""migração_inicial
+"""new restart
 
-Revision ID: 836f084326d9
-Revises: 
-Create Date: 2026-05-11 21:02:27.475831
+Revision ID: 198f181500c7
+Revises: 53dff2ad9d8c
+Create Date: 2026-08-18 21:18:36.546770
 
 """
 from typing import Sequence, Union
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '836f084326d9'
-down_revision: Union[str, Sequence[str], None] = None
+revision: str = '198f181500c7'
+down_revision: Union[str, Sequence[str], None] = '53dff2ad9d8c'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -37,64 +37,82 @@ def upgrade() -> None:
     op.create_index('users_email_idx', 'users', ['email'], unique=False)
     op.create_index('users_status_idx', 'users', ['status'], unique=False)
     op.create_index('users_username_idx', 'users', ['username'], unique=False)
+    op.create_table('enterprises',
+    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('user_id', sa.UUID(), nullable=True),
+    sa.Column('name', sa.String(length=255), nullable=False),
+    sa.Column('description', sa.Text(), nullable=False),
+    sa.Column('keywords', sa.ARRAY(sa.String()), nullable=False),
+    sa.Column('ufs', sa.ARRAY(sa.String()), nullable=False),
+    sa.Column('contraction_methods', sa.ARRAY(sa.String()), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='set null'),
+    sa.PrimaryKeyConstraint('id')
+    )
     op.create_table('rpa_scrap_requests',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('title', sa.String(length=255), nullable=False),
     sa.Column('filter_payload', sa.JSON(), nullable=False),
-    sa.Column('requested_by_user_id', sa.UUID(), nullable=True),
-    sa.Column('session_id', sa.UUID(), nullable=True),
-    sa.Column('error_message', sa.Text(), nullable=True),
-    sa.Column('total_items', sa.Integer(), nullable=False),
+    sa.Column('enterprise_id', sa.UUID(), nullable=False),
+    sa.Column('current_page', sa.Integer(), nullable=False),
+    sa.Column('total', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
-    sa.ForeignKeyConstraint(['requested_by_user_id'], ['users.id'], ondelete='set null'),
+    sa.ForeignKeyConstraint(['enterprise_id'], ['enterprises.id'], ondelete='cascade'),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('rpa_scrap_requests_created_at_idx', 'rpa_scrap_requests', ['created_at'], unique=False)
-    op.create_index('rpa_scrap_requests_session_id_idx', 'rpa_scrap_requests', ['session_id'], unique=False)
-    op.create_index('rpa_scrap_requests_user_id_idx', 'rpa_scrap_requests', ['requested_by_user_id'], unique=False)
+    op.create_index('rpa_scrap_requests_enterprise_id_idx', 'rpa_scrap_requests', ['enterprise_id'], unique=False)
     op.create_table('rpa_scrap_events',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('request_id', sa.UUID(), nullable=False),
     sa.Column('step', sa.Enum('PENDING', 'PROCESSING', 'COMPLETED', name='rpa_request_step'), nullable=False),
     sa.Column('status', sa.Enum('PENDING', 'PROCESSING', 'SUCCESS', 'FAILURE', 'OCCURRENCE', name='rpa_request_status'), nullable=False),
     sa.Column('message', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
     sa.ForeignKeyConstraint(['request_id'], ['rpa_scrap_requests.id'], ondelete='cascade'),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('rpa_scrap_events_request_id_created_at_idx', 'rpa_scrap_events', ['request_id', 'created_at'], unique=False)
     op.create_index('rpa_scrap_events_request_id_idx', 'rpa_scrap_events', ['request_id'], unique=False)
     op.create_table('rpa_scrap_results',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('request_id', sa.UUID(), nullable=False),
     sa.Column('payload', sa.JSON(), nullable=False),
+    sa.Column('is_complete', sa.Boolean(), nullable=False),
+    sa.Column('is_loading', sa.Boolean(), nullable=False),
+    sa.Column('is_favorite', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
     sa.ForeignKeyConstraint(['request_id'], ['rpa_scrap_requests.id'], ondelete='cascade'),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index('rpa_scrap_results_created_at_idx', 'rpa_scrap_results', ['created_at'], unique=False)
     op.create_index('rpa_scrap_results_request_id_idx', 'rpa_scrap_results', ['request_id'], unique=False)
+    op.create_table('rpa_ia_ratings',
+    sa.Column('id', sa.UUID(), nullable=False),
+    sa.Column('result_id', sa.UUID(), nullable=False),
+    sa.Column('score', sa.Float(), nullable=False),
+    sa.Column('rating_detail', sa.Text(), nullable=True),
+    sa.ForeignKeyConstraint(['result_id'], ['rpa_scrap_results.id'], ondelete='cascade'),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('rpa_ia_ratings_result_id_idx', 'rpa_ia_ratings', ['result_id'], unique=False)
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index('rpa_ia_ratings_result_id_idx', table_name='rpa_ia_ratings')
+    op.drop_table('rpa_ia_ratings')
     op.drop_index('rpa_scrap_results_request_id_idx', table_name='rpa_scrap_results')
-    op.drop_index('rpa_scrap_results_created_at_idx', table_name='rpa_scrap_results')
     op.drop_table('rpa_scrap_results')
     op.drop_index('rpa_scrap_events_request_id_idx', table_name='rpa_scrap_events')
-    op.drop_index('rpa_scrap_events_request_id_created_at_idx', table_name='rpa_scrap_events')
     op.drop_table('rpa_scrap_events')
-    op.drop_index('rpa_scrap_requests_user_id_idx', table_name='rpa_scrap_requests')
-    op.drop_index('rpa_scrap_requests_session_id_idx', table_name='rpa_scrap_requests')
+    op.drop_index('rpa_scrap_requests_enterprise_id_idx', table_name='rpa_scrap_requests')
     op.drop_index('rpa_scrap_requests_created_at_idx', table_name='rpa_scrap_requests')
     op.drop_table('rpa_scrap_requests')
+    op.drop_table('enterprises')
     op.drop_index('users_username_idx', table_name='users')
     op.drop_index('users_status_idx', table_name='users')
     op.drop_index('users_email_idx', table_name='users')

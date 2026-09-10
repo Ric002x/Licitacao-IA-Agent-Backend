@@ -2,7 +2,7 @@
 Módulo de rotas da API
 """
 from fastapi import APIRouter
-from app.api.routes import user, licitacoes, auth
+from app.api.routes import user, licitacoes, auth, empresa, requisicao
 
 # Router principal que agrupa todas as rotas
 api_router = APIRouter()
@@ -11,3 +11,5 @@ api_router = APIRouter()
 api_router.include_router(user.router)
 api_router.include_router(licitacoes.router)
 api_router.include_router(auth.router)
+api_router.include_router(empresa.router)
+api_router.include_router(requisicao.router)

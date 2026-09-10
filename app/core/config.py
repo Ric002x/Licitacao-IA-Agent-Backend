@@ -53,7 +53,7 @@ class Settings:
         'FIRST_SUPERUSER', "test@example.com")
     FIRST_SUPERUSER_PASSWORD: str = os.environ.get(
         'FIRST_SUPERUSER_PASSWORD', "senha12345")
-    FIRST_SUPERUSER_USERNAME: str = "ricvenicius"
+    FIRST_SUPERUSER_USERNAME: str = "Ricardo Venicius"
 
 
 settings = Settings()

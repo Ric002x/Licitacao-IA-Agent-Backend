@@ -1,8 +1,9 @@
 from app.api.routes.auth import create_token
-from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.user import UserBody, UserCreate, UserUpdatePassword
 from fastapi import APIRouter, HTTPException, status
 from app.models.models import User
-from app.api.deps import SessionDep, CurrentUser
+from app.api.deps.session import SessionDep
+from app.api.deps.auth import CurrentUser
 from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
@@ -15,7 +16,7 @@ def criar_usuario(data: UserCreate, db: SessionDep):
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail="Email já cadastrado"
         )
 
     user_obj = User(
@@ -28,17 +29,15 @@ def criar_usuario(data: UserCreate, db: SessionDep):
     db.commit()
 
     token_jwt = create_token(user_obj.id)
-    return JSONResponse(
-        {
-            "access_token": token_jwt,
-            "user": user_obj.data
-        }
-    )
+    return JSONResponse({
+        "access_token": token_jwt,
+        "user": user_obj.data
+    })
 
 
 @router.put("/atualizar")
-def update_user(
-        current_user: CurrentUser, session: SessionDep, data: UserUpdate):
+def atualizar_usuario(
+        current_user: CurrentUser, session: SessionDep, data: UserBody):
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         if key == "password":
@@ -48,4 +47,16 @@ def update_user(
 
     session.commit()
     session.refresh(current_user)
-    return current_user
+    return current_user.data
+
+
+@router.put("/atualizar-senha")
+def atualizar_senha(
+        current_user: CurrentUser, session: SessionDep,
+        data: UserUpdatePassword):
+
+    current_user.set_password(data.new_password)
+
+    session.commit()
+    session.refresh(current_user)
+    return {"message": "Senha atualizada com sucesso"}

@@ -2,16 +2,19 @@
 Router para rotas de licitações
 """
 import asyncio
-from datetime import datetime
 
 from app.service.agentes.agente_rating_detail import analise_ia_detail
+from app.service.scrapping import (
+    pegar_detalhes_licitacao, pegar_licitacoes_base)
 from fastapi import APIRouter, HTTPException, BackgroundTasks
-from app.schemas.licitacoes import DescricaoIA, FiltroLicitacao
-from app.service.scrapping import iniciar_rpa
-from app.api.deps import SessionDep, CurrentUser
+from app.schemas.licitacoes import (
+    AtualizarBusca, BuscaLicitacoes, DescricaoIA, FiltroLicitacao,
+    RepetirBuscaLicitacoes)
+from app.api.deps.session import SessionDep
+from app.api.deps.auth import CurrentUser
 from app.models.models import (
-    RpaIARating, RpaScrapRequest, RpaScrapEvent, RpaRequestStepEnum,
-    RpaRequestStatusEnum, RpaScrapResult
+    Enterprise, RpaIARating, RpaRequestStatusEnum, RpaRequestStepEnum,
+    RpaScrapRequest, RpaScrapEvent, RpaScrapResult
 )
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -19,9 +22,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 router = APIRouter(prefix="/licitacoes", tags=["licitacoes"])
 
 
-@router.post("/procurar")
-async def procurar_licitacoes(
-    filtro: FiltroLicitacao, current_user: CurrentUser,
+@router.post("/nova-busca", status_code=201)
+async def buscar_novas_licitacoes(
+    data: BuscaLicitacoes, current_user: CurrentUser,
     db: SessionDep
 ):
     """
@@ -40,94 +43,173 @@ async def procurar_licitacoes(
         Status da requisição com ID para acompanhamento.
     """
     # Pesquisa se há uma solicitação de busca existente, se não, cria uma nova.
+    empresa = db.query(Enterprise).filter(
+        Enterprise.id == data.enterprise_id,
+        Enterprise.user_id == str(current_user.id),
+        Enterprise.deleted_at.is_(None)
+    ).first()
+
+    if not empresa:
+        raise HTTPException(
+            404, "Empresa não encontrada"
+        )
+
     filter_payload = {
-        "palavra_chave": filtro.palavra_chave,
-        "ufs": filtro.ufs,
-        "modalidades": filtro.modalidades_de_contratacao,
-        "descricao_analise_ia": filtro.descricao_analise_ia
+        "palavras_chaves": empresa.keywords,
+        "ufs": empresa.ufs,
+        "modalidades_de_contratacao": empresa.contraction_methods,
+        "descricao_analise_ia": empresa.description
     }
 
-    if filtro.request_id:
-        requisicao = db.query(RpaScrapRequest).filter(
-            RpaScrapRequest.requested_by_user_id == current_user.id,
-            RpaScrapRequest.id == filtro.request_id,
-            # RpaScrapRequest.deleted_at.isnot(None)
+    requisicao = RpaScrapRequest(
+        title=empresa.keywords[0] or 'Sem filtro',
+        enterprise_id=empresa.id,
+        filter_payload=filter_payload
+    )
+    db.add(requisicao)
+    db.commit()
+
+    status = RpaScrapEvent(
+        request_id=str(requisicao.id),
+        message="iniciando...",
+        step=RpaRequestStepEnum.PENDING,
+        status=RpaRequestStatusEnum.PENDING
+    )
+
+    db.add(status)
+    db.commit()
+
+    novo_filtro = FiltroLicitacao(**filter_payload)
+
+    asyncio.create_task(
+        pegar_licitacoes_base(novo_filtro, requisicao, page=1)
+    )
+
+    return requisicao.data
+
+
+@router.put("/resetar-busca")
+async def repetir_busca_licitacoes(
+        data: RepetirBuscaLicitacoes,
+        current_user: CurrentUser, db: SessionDep):
+
+    requisicao = (
+        db.query(RpaScrapRequest)
+        .join(RpaScrapRequest.enterprise)
+        .join(Enterprise.user)
+        .filter(
+            RpaScrapRequest.id == data.request_id,
+            RpaScrapRequest.enterprise_id == data.enterprise_id,
+            Enterprise.user_id == current_user.id,
+            RpaScrapRequest.deleted_at.is_(None)
         ).first()
+    )
 
-        if not requisicao:
-            raise HTTPException(
-                status_code=404,
-                detail="Requisição não encontrada para este id")
+    if not requisicao:
+        raise HTTPException(
+            404, "Requisição não encontrada")
 
-        requisicao.filter_payload = filter_payload
-        requisicao.title = f"Busca: {filtro.palavra_chave or 'Sem filtro'}"
-        db.commit()
-        db.refresh(requisicao)
+    status = db.query(RpaScrapEvent).filter(
+        RpaScrapEvent.request_id == str(requisicao.id)
+    ).first()
 
-        status = db.query(RpaScrapEvent).filter(
-            RpaScrapEvent.request_id == str(requisicao.id)
-        ).first()
-
-        if not status:
-            raise HTTPException(
-                status_code=404, detail="Status da requisição não encontrado")
-
-        status.step = RpaRequestStepEnum.PENDING
-        status.status = RpaRequestStatusEnum.PENDING
-        status.message = "reiniciando..."
-
-    else:
-        requisicao = RpaScrapRequest(
-            title=f"Busca: {filtro.palavra_chave or 'Sem filtro'}",
-            requested_by_user_id=current_user.id,
-            filter_payload=filter_payload
-        )
-        db.add(requisicao)
-        db.commit()
-        db.refresh(requisicao)
-
+    if not status:
         status = RpaScrapEvent(
             request_id=str(requisicao.id),
-            message="iniciando...",
+            message="reiniciando...",
             step=RpaRequestStepEnum.PENDING,
             status=RpaRequestStatusEnum.PENDING
         )
         db.add(status)
 
-    try:
-        db.commit()
-        db.refresh(status)
-    except Exception as e:
-        return {"erro": e}
+    status.step = RpaRequestStepEnum.PENDING
+    status.status = RpaRequestStatusEnum.PENDING
+    status.message = "reiniciando..."
+
+    db.query(RpaScrapResult).filter(
+        RpaScrapResult.request_id == requisicao.id
+    ).delete()
+
+    db.commit()
+    db.refresh(requisicao)
+    db.refresh(status)
+
+    requisicao_payload = FiltroLicitacao(**requisicao.filter_payload)
 
     asyncio.create_task(
-        iniciar_rpa(db, filtro, str(requisicao.id))
+        pegar_licitacoes_base(requisicao_payload, requisicao, page=1)
     )
 
-    return {
-        "id": str(requisicao.id),
-        "title": requisicao.title,
-        "filter_payload": requisicao.filter_payload,
-        "created_at": requisicao.created_at,
-        "updated_at": requisicao.updated_at
-    }
+    return requisicao.data
 
 
-@router.get("/status/{request_id}")
+@router.put("/atualizar-busca", status_code=201)
+async def atualizar_busca(
+        data: AtualizarBusca,
+        current_user: CurrentUser, db: SessionDep
+):
+    requisicao = (
+        db.query(RpaScrapRequest)
+        .join(RpaScrapRequest.enterprise)
+        .join(Enterprise.user)
+        .filter(
+            RpaScrapRequest.id == data.request_id,
+            RpaScrapRequest.enterprise_id == data.enterprise_id,
+            Enterprise.user_id == current_user.id,
+            RpaScrapRequest.deleted_at.is_(None)
+        ).first()
+    )
+
+    if not requisicao:
+        raise HTTPException(
+            404, "Requisição não encontrada")
+
+    status = db.query(RpaScrapEvent).filter(
+        RpaScrapEvent.request_id == str(requisicao.id)
+    ).first()
+
+    if not status:
+        status = RpaScrapEvent(
+            request_id=str(requisicao.id),
+            message="buscando mais licitacoes...",
+            step=RpaRequestStepEnum.PENDING,
+            status=RpaRequestStatusEnum.PENDING
+        )
+        db.add(status)
+
+    status.step = RpaRequestStepEnum.PENDING
+    status.status = RpaRequestStatusEnum.PENDING
+    status.message = "buscando mais licitacoes..."
+
+    requisicao.current_page = requisicao.current_page + 1
+    db.commit()
+    db.refresh(requisicao)
+
+    requisicao_payload = FiltroLicitacao(**requisicao.filter_payload)
+
+    asyncio.create_task(
+        pegar_licitacoes_base(
+            requisicao_payload, requisicao,
+            requisicao.current_page)
+    )
+
+    return {"message": "buscando por mais licitações"}
+
+
+@router.get("/status-busca")
 async def status_licitacao(
-        current_user: CurrentUser, request_id: str, db: SessionDep):
+        current_user: CurrentUser, enterprise_id: str,
+        request_id: str, db: SessionDep):
     """Obtém os detalhes de uma licitação específica"""
     status = (
         db.query(RpaScrapEvent).filter(
             RpaScrapEvent.request_id == request_id,
-            RpaScrapRequest.requested_by_user_id == current_user.id,
-            # RpaScrapRequest.deleted_at.isnot(None)
+            RpaScrapRequest.enterprise_id == enterprise_id,
+            Enterprise.user_id == current_user.id,
+            RpaScrapRequest.deleted_at.is_(None)
         )
-        .join(
-            RpaScrapRequest,
-            RpaScrapEvent.request_id == RpaScrapRequest.id
-        )
-        .first()
+        .join(RpaScrapEvent.request).join(RpaScrapRequest.enterprise)
+        .join(Enterprise.user).first()
     )
 
     if not status:
@@ -141,53 +223,114 @@ async def status_licitacao(
         "step": status.step.value,
         "status": status.status.value,
         "message": status.message,
-        "created_at": status.created_at
     }
 
 
-@router.get("/resultado/{request_id}")
+@router.get("/listar")
 async def resultado_licitacoes(
-        current_user: CurrentUser, request_id: str, db: SessionDep):
-    resultados = (
-        db.query(
-            RpaScrapResult.id,
-            RpaScrapResult.payload,
-            RpaScrapResult.created_at,
-            RpaIARating.score,
-            RpaIARating.rating_detail,
-        )
-        .join(
-            RpaIARating,
-            RpaIARating.result_id == RpaScrapResult.id
-        )
-        .join(
-            RpaScrapRequest,
-            RpaScrapRequest.id == RpaScrapResult.request_id
-        )
+        current_user: CurrentUser, enterprise_id: str,
+        request_id: str, db: SessionDep):
+    resultados_q = (
+        db.query(RpaScrapResult)
+        .join(RpaScrapResult.request)
+        .join(RpaScrapRequest.enterprise)
+        .join(RpaScrapResult.rating)
         .filter(
             RpaScrapResult.request_id == request_id,
-            RpaScrapRequest.requested_by_user_id == current_user.id,
-            # RpaScrapRequest.deleted_at.isnot(None)
+            RpaScrapRequest.enterprise_id == enterprise_id,
+            Enterprise.user_id == current_user.id,
+            RpaScrapRequest.deleted_at.is_(None)
         )
-        .order_by(RpaIARating.score.desc())
+        .order_by(RpaIARating.score.desc(), RpaScrapResult.id.desc(),)
         .all()
     )
 
-    if not resultados or not len(resultados) > 0:
+    total = len(resultados_q)
+
+    if not resultados_q or not len(resultados_q) > 0:
         raise HTTPException(
-            404, "resultados não encontrados para esse id"
+            404, "resultados não encontrados para essa requisição"
         )
 
-    return [
-        {
-            "id": str(r.id),
-            "payload": r.payload,
-            "created_at": r.created_at,
-            "score": r.score,
-            "rating_detail": r.rating_detail
-        }
-        for r in resultados
-    ]
+    return {
+        "total": total,
+        "licitacoes": [
+            {
+                "id": str(r.id),
+                "payload": r.payload,
+                "score": r.rating.score,
+                "is_favorite": r.is_favorite,
+            }
+            for r in resultados_q
+        ]
+    }
+
+
+@router.get("/detalhes")
+async def detalhes_licitacao(
+        db: SessionDep, current_user: CurrentUser,
+        licitacao_id: str, search: str):
+    licitacao = (
+        db.query(RpaScrapResult)
+        .join(RpaScrapResult.request)
+        .join(RpaScrapRequest.enterprise)
+        .join(Enterprise.user)
+        .filter(
+            RpaScrapResult.id == licitacao_id,
+            Enterprise.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not licitacao:
+        raise HTTPException(
+            404, "Licitação não encontrada"
+        )
+
+    if search == "true":
+        if not licitacao.is_complete and not licitacao.is_loading:
+            licitacao.is_loading = True
+            licitacao.status = "processing"
+            db.commit()
+            db.refresh(licitacao)
+
+            asyncio.create_task(
+                pegar_detalhes_licitacao(licitacao.id)
+            )
+
+    return JSONResponse({
+        "id": str(licitacao.id),
+        "payload": licitacao.payload,
+        "is_favorite": licitacao.is_favorite,
+        "score": licitacao.rating.score,
+        "rating_detail": licitacao.rating.rating_detail or "",
+    })
+
+
+@router.get("/detalhes/status")
+async def detalhes_licitacao_status(
+        db: SessionDep, current_user: CurrentUser, licitacao_id: str):
+    licitacao = (
+        db.query(RpaScrapResult)
+        .join(RpaScrapResult.request)
+        .join(RpaScrapRequest.enterprise)
+        .join(Enterprise.user)
+        .filter(
+            RpaScrapResult.id == licitacao_id,
+            Enterprise.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not licitacao:
+        raise HTTPException(
+            404, "Licitação não encontrada"
+        )
+
+    return JSONResponse({
+        "is_complete": licitacao.is_complete,
+        "is_loading": licitacao.is_loading,
+        "status": licitacao.status,
+    })
 
 
 @router.post("/descricao_ia")
@@ -195,6 +338,19 @@ async def gerar_descricao_ia(
     current_user: CurrentUser, db: SessionDep, descricao_ia: DescricaoIA,
     background_tasks: BackgroundTasks
 ):
+    rating = db.query(RpaIARating).filter(
+        RpaIARating.result_id == descricao_ia.result_id
+    ).first()
+    if not rating:
+        raise HTTPException(
+            404, "Licitacão não encontrada"
+        )
+
+    if rating.rating_detail:
+        return {
+            "message": "Descrição IA já feita para essa Licitação"
+        }
+
     resultado = (
         db.query(
             RpaScrapResult.payload,
@@ -202,10 +358,12 @@ async def gerar_descricao_ia(
             RpaIARating.rating_detail
         )
         .join(RpaScrapResult.request)
+        .join(RpaScrapRequest.enterprise)
+        .join(Enterprise.user)
         .filter(
             RpaScrapResult.id == descricao_ia.result_id,
-            RpaScrapRequest.requested_by_user_id == current_user.id,
-            # RpaScrapRequest.deleted_at.isnot(None)
+            Enterprise.user_id == current_user.id,
+            RpaScrapRequest.deleted_at.is_(None)
         )
         .first()
     )
@@ -223,63 +381,21 @@ async def gerar_descricao_ia(
             db.commit()
 
     async def gerador_resposta():
-        texto_acumulado = []
+        texto_acumulado: list[str] = []
 
-        async for chunk in analise_ia_detail(resultado):
-            texto_acumulado.append(chunk)
-            yield chunk
+        async for event in analise_ia_detail(resultado):  # noqa
+            if getattr(event, "event_type", None) != "step.delta":
+                continue
+
+            delta = getattr(event, "delta", None)
+            texto = getattr(delta, "text", None)
+            if not isinstance(texto, str):
+                continue
+
+            texto_acumulado.append(texto)
+            yield texto
 
         texto_final = "".join(texto_acumulado)
         background_tasks.add_task(salvar_no_banco, texto_final)
 
     return StreamingResponse(gerador_resposta(), media_type="text/plain")
-
-
-@router.get("/requisicoes")
-async def get_requisicoes(db: SessionDep, current_user: CurrentUser):
-    requisicoes = (
-        db.query(
-            RpaScrapRequest.id,
-            RpaScrapRequest.title,
-            RpaScrapRequest.filter_payload,
-            RpaScrapRequest.created_at
-        )
-        .filter(
-            RpaScrapRequest.requested_by_user_id == current_user.id,
-            # RpaScrapRequest.deleted_at.isnot(None)
-        )
-        .all()
-    )
-
-    return [
-        {
-            "id": r.id,
-            "title": r.title,
-            "filter_payload": r.filter_payload,
-            "created_at": r.created_at,
-        }
-        for r in requisicoes
-    ]
-
-
-@router.delete("/deletar")
-async def soft_delete_requisicao(
-    db: SessionDep, current_user: CurrentUser, request_id: str
-):
-    requisicao = db.query(RpaScrapRequest).filter(
-        RpaScrapRequest.id == request_id,
-        RpaScrapRequest.requested_by_user_id == current_user.id,
-        # RpaScrapRequest.deleted_at.isnot(None)
-    ).first()
-    if not requisicao:
-        raise HTTPException(
-            404, "Requisição não encontrada"
-        )
-
-    requisicao.deleted_at = datetime.now()
-    db.commit()
-    db.refresh(requisicao)
-
-    return JSONResponse({
-        "message": "requisição deletada com sucesso"
-    })

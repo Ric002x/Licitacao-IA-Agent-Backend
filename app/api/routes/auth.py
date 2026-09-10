@@ -4,7 +4,8 @@ from fastapi import APIRouter,  HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps.session import SessionDep
+from app.api.deps.auth import CurrentUser
 from app.models.models import User
 from app.core.config import settings
 from jose import jwt
@@ -28,8 +29,8 @@ def authenticate_user(session: Session, email, password):
     user = session.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(
-            status_code=404,
-            detail="user not find for that email"
+            status_code=401,
+            detail="credenciais inválidas"
         )
 
     if user.verify_password(password):
@@ -43,7 +44,7 @@ def authenticate_user(session: Session, email, password):
     else:
         raise HTTPException(
             status_code=401,
-            detail="invalid credentials"
+            detail="credenciais inválidas"
         )
 
 
