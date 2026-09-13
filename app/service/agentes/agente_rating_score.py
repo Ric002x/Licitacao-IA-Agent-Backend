@@ -4,7 +4,7 @@ from google import genai
 from sqlalchemy.orm import Session
 import json
 from pathlib import Path
-
+from google.genai.interactions import Interaction
 
 client = genai.Client()
 
@@ -24,7 +24,7 @@ def analise_ia(db: Session, filtro: FiltroLicitacao,
     """
     lista = []
     for resultado in resultados:
-        descricao = resultado.payload.get("descricao")
+        descricao = resultado.payload.get("descricao", {})
         res_id = str(resultado.id)
         lista.append({
             "result_id": res_id,
@@ -45,8 +45,12 @@ def analise_ia(db: Session, filtro: FiltroLicitacao,
 
     response = client.interactions.create(
         model="gemini-3.5-flash-lite",
-        input=content
+        input=content,
+        stream=False
     )
+
+    if not isinstance(response, Interaction):
+        return
 
     if not response.output_text:
         return
